@@ -1,249 +1,296 @@
-# Buntu Jelly Media Server Setup
+# Jellyfin Media Server: System Preparation Guide
 
-This README serves as a comprehensive guide and personal notes for my Dockerized Jellyfin media server. It covers hardware, storage management, core application configurations, and network settings, aimed at streamlining future maintenance and troubleshooting.
+This guide outlines the essential steps to prepare your Ubuntu system for a Dockerized Jellyfin media server. It covers hardware and storage configuration, data protection, network settings, and automatic system updates, laying a robust foundation for your media stack.
 
-## 1. System Hardware & Storage Configuration
+-----
 
-**Drives:** This computer is equipped with 5 drives, strategically allocated for optimal performance and storage:
-1.  **NVMe SSD (OS):** The primary drive for the Ubuntu operating system (`/`).
-2.  **SATA SSD (Cache/Downloads):** A high-speed SATA SSD (mounted at `/mnt/cache`) dedicated to active downloads, temporary files, and application configurations that benefit from SSD speeds. This is crucial for hardlinking efficiency.
-3.  **HDDs (3x - Media Storage):** Three larger Hard Disk Drives (`/mnt/data1`, `/mnt/data2`, `/mnt/data3`) for the final, long-term storage of media files. These are pooled together.
-4.  **HDD (Parity):** A dedicated HDD (`/mnt/parity`) for SnapRAID parity data, enabling data recovery in case of media drive failures.
+## 1\. System Hardware & Storage Configuration
 
-**File System Table (`fstab`):**
-* Review drive mounts, their file systems, and mounting options for persistence across reboots. This is where `mergerfs` is also configured.
-    ```bash
-    sudo nvim /etc/fstab
-    ```
-* **Expected Mount Points:**
-    * `/` (OS on NVMe)
-    * `/mnt/cache` (SATA SSD for downloads/cache)
-    * `/mnt/data1`, `/mnt/data2`, `/mnt/data3` (Individual HDDs for media data)
-    * `/mnt/parity` (HDD for SnapRAID parity)
-    * `/mnt/storage` (MergerFS pooled media library)
+This server utilizes a multi-drive setup for optimal performance, storage, and data protection:
 
-## 2. Storage Management & Data Protection
+  * **NVMe SSD (OS):** The primary drive for the Ubuntu operating system (`/`).
+  * **SATA SSD (Cache/Downloads):** Mounted at `/mnt/cache`, this high-speed drive is dedicated to active downloads, temporary files, and application configurations that benefit from SSD speeds. It's crucial for efficient hardlinking.
+  * **HDDs (3x - Media Storage):** Three larger Hard Disk Drives (`/mnt/data1`, `/mnt/data2`, `/mnt/data3`) are used for the final, long-term storage of media files. These drives are pooled together using MergerFS.
+  * **HDD (Parity):** A dedicated HDD (`/mnt/parity`) stores SnapRAID parity data, enabling data recovery in case one or more media drives fail.
+
+### File System Table (`fstab`) Configuration
+
+The `/etc/fstab` file manages how your drives are mounted and configured persistently across reboots. This is also where **MergerFS** is set up.
+
+To review and edit your `fstab` file:
+
+```bash
+sudo nvim /etc/fstab
+```
+
+**Ensure the following mount points are configured:**
+
+  * `/` (OS on NVMe)
+  * `/mnt/cache` (SATA SSD for downloads/cache)
+  * `/mnt/data1`, `/mnt/data2`, `/mnt/data3` (Individual HDDs for media data)
+  * `/mnt/parity` (HDD for SnapRAID parity)
+  * `/mnt/storage` (MergerFS pooled media library)
+
+-----
+
+## 2\. Storage Management & Data Protection
 
 ### MergerFS (Drive Pooling)
 
-* **Purpose:** Pools the multiple HDDs (`/mnt/data1`, `/mnt/data2`, `/mnt/data3`) into a single, unified virtual filesystem (`/mnt/storage`). This makes all your media appear as one large drive to Jellyfin and the "arr" applications, simplifying library management.
-* **Configuration:** The MergerFS mount point (`/mnt/storage`) is defined and managed within `/etc/fstab`.
-    ```bash
-    sudo nano /etc/fstab
-    ```
-    (Look for the `mergerfs` entry that combines your individual data drives into `/mnt/storage`).
+**Purpose:** MergerFS combines your multiple HDDs (`/mnt/data1`, `/mnt/data2`, `/mnt/data3`) into a single, unified virtual filesystem (`/mnt/storage`). This simplifies media library management by presenting all your drives as one large pool to Jellyfin and the "Arr" applications.
+
+**Configuration:** The MergerFS mount point (`/mnt/storage`) is defined within `/etc/fstab`. Look for the `mergerfs` entry that combines your individual data drives into `/mnt/storage`.
+
+```bash
+sudo nano /etc/fstab
+```
 
 ### SnapRAID (Data Protection)
 
-* **Purpose:** Provides data redundancy and protection against drive failures (up to the number of parity drives configured). It's used to recover data from failed data drives by using parity information stored on a separate drive (`/mnt/parity`). It is typically run periodically.
-* **Configuration:** The main SnapRAID configuration file:
-    ```bash
-    sudo nano /etc/snapraid.conf
-    ```
-    *Ensure `content` and `parity` paths are correct, and all `data` drives are listed.*
-* **Automation:** SnapRAID synchronization and scrubbing are automated via a cron job to ensure data protection is regularly updated and verified.
-    ```bash
-    sudo crontab -e
-    ```
-    (Look for the `snapraid sync` and `snapraid scrub` commands).
+**Purpose:** SnapRAID provides data redundancy and protection against drive failures (up to the number of parity drives configured). It allows you to recover data from failed data drives using parity information stored on a separate drive (`/mnt/parity`). SnapRAID is typically run periodically.
 
-## 3. Core Media Server Applications (Dockerized Stack)
+**Configuration:** The main SnapRAID configuration file is located at `/etc/snapraid.conf`.
 
-All core media services are deployed as Docker containers, orchestrated using `docker-compose.yml`. This setup ensures portability, isolation, and simplified management.
+```bash
+sudo nano /etc/snapraid.conf
+```
 
-**Docker Compose File Location:**
-* The primary `docker-compose.yml` defining the entire stack is located in the `jellyfin-stack` directory within your home folder:
-    ```bash
-    cd ~/jellyfin-stack
-    ```
+  * **Verify** that `content` and `parity` paths are correct, and all `data` drives are listed.
 
-**Consistent Permissions (`PUID` & `PGID`):**
-* All Docker containers are configured with `PUID=1000` (for user `jevonx`) and `PGID=1001` (for group `mediamanagers`). This ensures uniform file ownership and permissions between the host system and the Docker containers, which is critical for read/write access and hardlinking.
-* **Verify/Set Host Directory Permissions:**
-    ```bash
-    sudo chown -R jevonx:mediamanagers /mnt/cache/nzbget/downloads
-    sudo chmod -R 775 /mnt/cache/nzbget/downloads
-    sudo chown -R jevonx:mediamanagers /mnt/storage
-    sudo chmod -R 775 /mnt/storage
-    # Also for config directories if needed:
-    sudo chown -R jevonx:mediamanagers ~/jellyfin-stack/jellyfin/config
-    sudo chmod -R 775 ~/jellyfin-stack/jellyfin/config
-    # ... and similarly for sonarr/radarr/lidarr/prowlarr/nzbget config directories.
-    ```
+**Automation:** SnapRAID synchronization and scrubbing are automated via a cron job to ensure data protection is regularly updated and verified.
 
-**Crucial Docker Volume Mappings:**
-These mappings connect host directories to container directories, making data accessible and persistent:
-* **Download & Temporary Processing:** `/mnt/cache/nzbget/downloads` (Host - SATA SSD) maps to `/downloads` (Container) for NZBGet, Sonarr, Radarr, and Lidarr. **This is the source for hardlinks.**
-* **Final Media Library:** `/mnt/storage` (Host - MergerFS pooled HDDs) maps to `/media` (Container) for Sonarr, Radarr, Lidarr, and Jellyfin. **This is the destination for hardlinks and the source for Jellyfin's libraries.**
-* **Application Configurations:** `./{app}/config` (Host - within `~/jellyfin-stack`) maps to `/config` (Container) for each application's persistent settings.
+```bash
+sudo crontab -e
+```
 
-**Docker Management Commands:**
-* **Start the entire stack (detached mode):**
-    ```bash
-    cd ~/jellyfin-stack
-    docker compose up -d
-    ```
-* **Stop and remove all services:**
-    ```bash
-    cd ~/jellyfin-stack
-    docker compose down
-    ```
-* **Check status of running services:**
-    ```bash
-    docker compose ps
-    ```
-* **View real-time logs for a specific service (e.g., nzbget):**
-    ```bash
-    docker compose logs -f nzbget
-    ```
+  * Look for the `snapraid sync` and `snapraid scrub` commands in your crontab.
 
-### 3.1. Application-Specific Configurations
+-----
 
-#### a. NZBGet (Usenet Download Client)
-
-* **Docker Container Name:** `nzbget`
-* **Web UI Access:** `http://your-server-ip:6789`
-* **Host Path for Downloads:** `/mnt/cache/nzbget/downloads` (for incomplete, complete, and intermediate files)
-* **Container Path for Downloads:** `/downloads`
-* **Internal UI Paths (Settings -> Paths):**
-    * `MainDir: /downloads`
-    * `DestDir: /downloads/complete`
-    * `InterDir: /downloads/incomplete`
-* **Categories:** Ensure `tv`, `movies`, and `music` categories are created in the NZBGet UI. For each category, set the `DestDir` to just the category name (e.g., `tv` for the TV category), so NZBGet places files into `/downloads/complete/tv`, etc.
-* **Usenet Server:** Configured with provider details (host, port, username, password, SSL).
-
-#### b. Prowlarr (Indexer Management)
-
-* **Docker Container Name:** `prowlarr`
-* **Web UI Access:** `http://your-server-ip:9696`
-* **Role:** Centralizes and manages Usenet indexers (and optionally Torrent trackers). It provides these indexers to Sonarr, Radarr, and Lidarr.
-* **Configuration:**
-    * Add Usenet indexers (e.g., NZBGeek) in Prowlarr.
-    * Add Sonarr, Radarr, and Lidarr as "Apps" in Prowlarr, providing their correct URLs and API keys.
-    * Perform a "Sync Indexers" action in Prowlarr after configuring "arr" apps to push indexers.
-
-#### c. Sonarr / Radarr / Lidarr ("Arr" Apps - Automation)
-
-* **Docker Container Names:** `sonarr`, `radarr`, `lidarr`
-* **Web UI Access:**
-    * Sonarr: `http://your-server-ip:8989`
-    * Radarr: `http://your-server-ip:7878`
-    * Lidarr: `http://your-server-ip:8686`
-* **Key Settings for Each App:**
-    * **Download Client (NZBGet):** Configured as the primary download client for each "arr" app.
-    * **Remote Path Mappings (CRITICAL for Hardlinking):**
-        * This mapping tells the "arr" app how to find a completed download that NZBGet reports.
-        * Example for Sonarr:
-            * `Remote Path:` `/downloads/complete/tv` (This is what NZBGet tells Sonarr)
-            * `Local Path:` `/downloads/complete/tv` (This is where Sonarr finds the file within its own container, using the *same* mapped volume as NZBGet).
-        * Repeat this pattern for Radarr (`/downloads/complete/movies`) and Lidarr (`/downloads/complete/music`).
-    * **Media Management:** "Use Hardlinks Instead Of Copy" **must be enabled** in each app's Media Management settings. This ensures efficient, space-saving imports.
-    * **Root Folders:** These define where the final media files are stored on your pooled storage:
-        * Sonarr: `/media/tv`
-        * Radarr: `/media/movies`
-        * Lidarr: `/media/music`
-        (These align with the `/mnt/storage:/media` Docker volume mapping).
-
-#### d. Jellyfin (Media Server)
-
-* **Docker Container Name:** `jellyfin`
-* **Web UI Access:** `http://your-server-ip:8096`
-* **Media Library Paths:** Configured in the Jellyfin UI to point to the correct container paths for your media:
-    * Add a Movies library, path: `/media/movies`
-    * Add a TV Shows library, path: `/media/tv`
-    * Add a Music library, path: `/media/music`
-* **Hardware Transcoding:** Enabled using `/dev/dri` device mapping in the `docker-compose.yml` for Intel iGPU acceleration. Verify in Jellyfin's Dashboard -> Transcoding settings.
-
-## 4. Usenet Providers & Indexers
-
-### Usenet Provider
-* **Current Provider:** Usenet Farm 
-
-### Usenet Indexer
-* **Current Indexer:** NZBGeek 
-## Firewall (UFW) & External Access (Tailscale Funnel) Configuration
+## 3\. Firewall (UFW) & External Access (Tailscale Funnel) Configuration
 
 This section details the Uncomplicated Firewall (UFW) settings and how Tailscale Funnel is used to manage external access to services on this server.
 
-### 1. Purpose of this Configuration
+### 3.1. Purpose of this Configuration
 
 The primary goals of this firewall and access configuration are:
 
-* **Enhanced Security:** To significantly reduce the server's attack surface by blocking all incoming connections by default.
-* **Restricted Internal Access:** To ensure that all services (like Sonarr, Radarr, NZBGet, Lidarr, Readarr, etc.) are only accessible from devices within the private Tailscale network. This means they are *not* directly exposed to the public internet.
-* **Secure External Access for Jellyfin:** To provide secure, encrypted, and easily managed public access to the Jellyfin server specifically, without exposing the server's public IP or requiring complex router port forwarding.
+  * **Enhanced Security:** To significantly reduce the server's attack surface by blocking all incoming connections by default.
+  * **Restricted Internal Access:** To ensure that all services (like Sonarr, Radarr, NZBGet, Lidarr, Readarr, etc.) are only accessible from devices within the private Tailscale network. This means they are *not* directly exposed to the public internet.
+  * **Secure External Access for Jellyfin:** To provide secure, encrypted, and easily managed public access to the Jellyfin server specifically, without exposing the server's public IP or requiring complex router port forwarding.
 
-### 2. How this Configuration was Achieved
+### 3.2. How this Configuration was Achieved
 
 This setup was configured by:
 
-* **Resetting UFW:** The existing UFW rules were reset to their default, highly restrictive state (deny incoming, allow outgoing).
-* **Allowing Tailscale Network Traffic:** A specific UFW rule was added to permit all incoming traffic originating from the `tailscale0` network interface. This allows any device authenticated to this server's Tailscale network to access all services running on the server.
-* **Restricting SSH:** The SSH service (port 22) was explicitly configured to only accept connections originating from within the Tailscale network. Public SSH access is blocked.
-* **Enabling Tailscale Funnel for Jellyfin:** The `tailscale funnel` command with the `--bg` (background/persistent) flag was used to expose the Jellyfin web interface (on port 8096) to the public internet via a secure Tailscale relay.
+  * **Resetting UFW:** The existing UFW rules were reset to their default, highly restrictive state (deny incoming, allow outgoing).
+  * **Allowing Tailscale Network Traffic:** A specific UFW rule was added to permit all incoming traffic originating from the `tailscale0` network interface. This allows any device authenticated to this server's Tailscale network to access all services running on the server.
+  * **Restricting SSH:** The SSH service (port 22) was explicitly configured to only accept connections originating from within the Tailscale network. Public SSH access is blocked.
+  * **Enabling Tailscale Funnel for Jellyfin:** The `tailscale funnel` command with the `--bg` (background/persistent) flag was used to expose the Jellyfin web interface (on port 8096) to the public internet via a secure Tailscale relay.
 
-### 3. Current UFW Rules (`sudo ufw status verbose`)
+### 3.3. Current UFW Rules (`sudo ufw status verbose`)
 
+```bash
 Status: active
 Logging: on (low)
 Default: deny (incoming), allow (outgoing), deny (routed)
 New profiles: skip
 
-To                         Action      From
+To                                Action        From
+--                                ------        ----
+22/tcp on tailscale0              ALLOW IN      Anywhere
+Anywhere on tailscale0            ALLOW IN      Anywhere
+22/tcp (v6) on tailscale0         ALLOW IN      Anywhere (v6)
+Anywhere (v6) on tailscale0       ALLOW IN      Anywhere (v6)
+```
 
-22/tcp on tailscale0       ALLOW IN    Anywhere
+  * `Default: deny (incoming)`: This is the core security principle. Nothing comes in unless explicitly allowed.
+  * `Anywhere on tailscale0 ALLOW IN Anywhere`: This rule (and its IPv6 counterpart) grants full access to the server from any device connected to the Tailscale network. This ensures all your "Arr" applications, NZBGet, and other internal services are accessible from your trusted devices.
+  * `22/tcp on tailscale0 ALLOW IN Anywhere`: This rule specifically permits SSH access *only* from devices on your Tailscale network.
 
-Anywhere on tailscale0     ALLOW IN    Anywhere
-
-22/tcp (v6) on tailscale0  ALLOW IN    Anywhere (v6)
-
-Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)
-
-* **`Default: deny (incoming)`:** This is the core security principle. Nothing comes in unless explicitly allowed.
-* **`Anywhere on tailscale0 ALLOW IN Anywhere`:** This rule (and its IPv6 counterpart) grants full access to the server from any device connected to the Tailscale network. This ensures all your *arrs, NZBGet, and other internal services are accessible from your trusted devices.
-* **`22/tcp on tailscale0 ALLOW IN Anywhere`:** This rule specifically permits SSH access *only* from devices on your Tailscale network.
-
-### 4. Current Tailscale Funnel Configuration (`sudo tailscale funnel status`)
+### 3.4. Current Tailscale Funnel Configuration (`sudo tailscale funnel status`)
 
 This command shows which services are currently being exposed to the public internet via Tailscale Funnel.
 
-```
+```bash
 # Example output (your server name will differ)
-[https://your-server-name.tailscale.ts.net:8096/](https://your-server-name.tailscale.ts.net:8096/)  / proxy [http://127.0.0.1:8096](http://127.0.0.1:8096)
-```
----
-
-### 5. Stop specific Funnel (Jellyfin port 8096)
-
-`sudo tailscale funnel --bg 8096 off`
-
-#### Turn off all funnels 
-
-`sudo tailscale funnel --off-all`
-
-#### Funnel status
-
-`sudo tailscale funnel status`
-
-```Bash
-sudo systemctl stop tailscaled
-```
-Start the Tailscale Daemon:
-
-```Bash
-sudo systemctl start tailscaled
+https://your-server-name.tailscale.ts.net:8096/  / proxy http://localhost:8096
 ```
 
-Restart the Tailscale Daemon:
+### 3.5. Tailscale Funnel Management Commands
 
-```Bash
-sudo systemctl restart tailscaled
+  * **Stop specific Funnel (Jellyfin port 8096):**
+    ```bash
+    sudo tailscale funnel --bg 8096 off
+    ```
+  * **Turn off all funnels:**
+    ```bash
+    sudo tailscale funnel --off-all
+    ```
+  * **Funnel status:**
+    ```bash
+    sudo tailscale funnel status
+    ```
+  * **Stop the Tailscale Daemon:**
+    ```bash
+    sudo systemctl stop tailscaled
+    ```
+  * **Start the Tailscale Daemon:**
+    ```bash
+    sudo systemctl start tailscaled
+    ```
+  * **Restart the Tailscale Daemon:**
+    ```bash
+    sudo systemctl restart tailscaled
+    ```
+  * **Disconnect from Tailscale Network:**
+    ```bash
+    sudo tailscale down
+    ```
+
+-----
+
+## 4\. Automatic System Updates with Unattended Upgrades
+
+To ensure your server remains secure and up-to-date with the latest security patches and bug fixes, it's highly recommended to enable automatic system updates using `unattended-upgrades`. This service is designed for safe and non-interactive upgrades of critical packages.
+
+### Why Use `unattended-upgrades`?
+
+  * **Security:** Automatically applies security updates, patching vulnerabilities quickly.
+  * **Stability:** Designed to handle updates gracefully, minimizing the risk of system disruption.
+  * **Dependency Management:** Intelligently resolves package dependencies during upgrades.
+  * **Reboot Management:** Can be configured to automatically reboot the server at a specified time if required (e.g., after a kernel update).
+  * **Logging:** Provides detailed logs of update activity.
+
+### Setup Instructions
+
+Follow these steps to configure `unattended-upgrades` on your Ubuntu or Debian server:
+
+1.  **Update Package Lists and Install `unattended-upgrades`:**
+    First, ensure your package lists are up-to-date and install the `unattended-upgrades` package if it's not already present.
+
+    ```bash
+    sudo apt update
+    sudo apt install unattended-upgrades -y
+    ```
+
+2.  **Enable Automatic Upgrades Interactively:**
+    Run the `dpkg-reconfigure` command to go through an interactive setup. When prompted, select `Yes` to enable automatic updates. This will create or update the `/etc/apt/apt.conf.d/20auto-upgrades` configuration file.
+
+    ```bash
+    sudo dpkg-reconfigure --priority=low unattended-upgrades
+    ```
+
+3.  **Customize Unattended Upgrades (Optional but Recommended):**
+    The main configuration for `unattended-upgrades` is located in `/etc/apt/apt.conf.d/50unattended-upgrades`. Open this file with your preferred text editor (e.g., `nano`):
+
+    ```bash
+    sudo nano /etc/apt/apt.conf.d/50unattended-upgrades
+    ```
+
+    Inside this file, you can make the following common customizations by uncommenting (`//` to nothing) or modifying the relevant lines:
+
+      * **Enable Regular Updates (not just security):**
+        By default, it often only applies security updates. To include general package updates (bug fixes, minor features), uncomment the `"${distro_id}:${distro_codename}-updates";` line:
+
+        ```diff
+        --- a/etc/apt/apt.conf.d/50unattended-upgrades
+        +++ b/etc/apt/apt.conf.d/50unattended-upgrades
+        @@ -8,7 +8,7 @@
+          Unattended-Upgrade::Allowed-Origins {
+                   "${distro_id}:${distro_codename}";
+                   "${distro_id}:${distro_codename}-security";
+        -//       "${distro_id}:${distro_codename}-updates";
+        +//       "${distro_id}:${distro_codename}-updates";
+                   "${distro_id}:${distro_codename}-proposed";
+                   "${distro_id}:${distro_codename}-backports";
+           };
+        ```
+
+        (Remove the `//` from `"${distro_id}:${distro_codename}-updates";`)
+
+      * **Automatic Reboot (with Time):**
+        If you want the server to automatically reboot when a reboot is required (e.g., after a kernel update), uncomment and set `Automatic-Reboot` to `"true"`. You can also specify a time for the reboot (e.g., "03:00" for 3 AM) to minimize disruption.
+
+        **Caution:** Be mindful when enabling automatic reboots for production services that might require specific startup sequences or manual checks.
+
+        ```diff
+        --- a/etc/apt/apt.conf.d/50unattended-upgrades
+        +++ b/etc/apt/apt.conf.d/50unattended-upgrades
+        @@ -56,8 +56,8 @@
+          // Automatically reboot WITHOUT CONFIRMATION if
+          // the file /var/run/reboot-required is found after the upgrade
+          //Unattended-Upgrade::Automatic-Reboot "false";
+        -// If automatic reboot is enabled and needed, reboot at the specific
+        -// time instead of immediately
+        -// Default: "now"
+        -//Unattended-Upgrade::Automatic-Reboot-Time "02:00";
+        +// Unattended-Upgrade::Automatic-Reboot "true";
+        +// Unattended-Upgrade::Automatic-Reboot-Time "03:00"; // Example: reboot at 3 AM
+        ```
+
+        (Uncomment `Unattended-Upgrade::Automatic-Reboot "true";` and `Unattended-Upgrade::Automatic-Reboot-Time "03:00";`)
+
+      * **Email Notifications:**
+        To receive email notifications in case of problems during an upgrade or if a reboot is needed, uncomment `Unattended-Upgrade::Mail` and replace `"root@localhost"` with your email address. Note that this requires a mail transfer agent (MTA) like Postfix or Sendmail to be installed and configured on your server.
+
+        ```diff
+        --- a/etc/apt/apt.conf.d/50unattended-upgrades
+        +++ b/etc/apt/apt.conf.d/50unattended-upgrades
+        @@ -20,7 +20,7 @@
+          // Send email to this address for problems or new releases
+          //Unattended-Upgrade::Mail "root@localhost";
+        ```
+
+        (Uncomment and change to `Unattended-Upgrade::Mail "your_email@example.com";`)
+
+      * **Remove Unused Dependencies:**
+        To automatically clean up orphaned packages after an upgrade (similar to `apt autoremove`), uncomment `Unattended-Upgrade::Remove-Unused-Dependencies`:
+
+        ```diff
+        --- a/etc/apt/apt.conf.d/50unattended-upgrades
+        +++ b/etc/apt/apt.conf.d/50unattended-upgrades
+        @@ -67,7 +67,7 @@
+          // Do automatic removal of new unused dependencies after the upgrade
+          // (equivalent to apt-get autoremove)
+          //Unattended-Upgrade::Remove-Unused-Dependencies "false";
+        +//Unattended-Upgrade::Remove-Unused-Dependencies "true";
+        ```
+
+        (Uncomment `Unattended-Upgrade::Remove-Unused-Dependencies "true";`)
+
+      * **Save and Exit:** Save the file (Ctrl+O, then Enter with `nano`) and exit (Ctrl+X with `nano`).
+
+4.  **Verify Configuration (Optional):**
+    You can check the daily frequency of updates by inspecting the `20auto-upgrades` file:
+
+    ```bash
+    cat /etc/apt/apt.conf.d/20auto-upgrades
+    ```
+
+    You should see lines like `APT::Periodic::Update-Package-Lists "1";` and `APT::Periodic::Unattended-Upgrade "1";`, indicating daily execution.
+
+5.  **Perform a Dry Run (Optional):**
+    To simulate what `unattended-upgrades` would do without actually applying changes, run a dry run:
+
+    ```bash
+    sudo unattended-upgrades --dry-run --debug
+    ```
+
+    This command will output detailed information about which packages would be upgraded.
+
+### Monitoring
+
+You can monitor the activity of `unattended-upgrades` by checking its logs:
+
+```bash
+sudo tail -f /var/log/unattended-upgrades/unattended-upgrades.log
 ```
 
-Disconnect from Tailscale Network:
+Or view the entire log file:
 
-```Bash
-sudo tailscale down
+```bash
+sudo less /var/log/unattended-upgrades/unattended-upgrades.log
 ```
 
-**Last Updated:** June 24
+-----
