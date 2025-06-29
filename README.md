@@ -88,6 +88,29 @@ This setup was configured by:
   * **Restricting SSH:** The SSH service (port 22) was explicitly configured to only accept connections originating from within the Tailscale network. Public SSH access is blocked.
   * **Enabling Tailscale Funnel for Jellyfin:** The `tailscale funnel` command with the `--bg` (background/persistent) flag was used to expose the Jellyfin web interface (on port 8096) to the public internet via a secure Tailscale relay.
 
+```bash
+# 1. Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw default deny routed
+
+# 2. Add your specific rules for Tailscale (IPv4 and IPv6)
+sudo ufw allow in on tailscale0 to any port 22 proto tcp
+sudo ufw allow in on tailscale0
+sudo ufw allow in on tailscale0 to any port 22 proto tcp from ::/0
+sudo ufw allow in on tailscale0 from ::/0
+
+# 3. Enable UFW (if not already active)
+# IMPORTANT: ONLY RUN THIS AFTER YOU'VE ADDED YOUR SSH ALLOW RULES!
+sudo ufw enable
+
+# 4. Configure logging
+sudo ufw logging on
+
+# 5. Verify your settings
+sudo ufw status verbose
+```
+
 ### 3.3. Current UFW Rules (`sudo ufw status verbose`)
 
 ```bash
